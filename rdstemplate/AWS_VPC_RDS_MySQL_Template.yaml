@@ -1,0 +1,365 @@
+---
+AWSTemplateFormatVersion: '2010-09-09'
+
+# CF Template creates a MySQL 8.0 Version Instance
+# VPC, Subnets, Security Groups are created
+# The created VPC, Subnet and Security Groups are used for configuring DB Instance
+# This will be a standalone DB instance for immediate development purpose. Good for usage in Dev environment
+
+Description: POC Stack for MySQL Version Creation
+Parameters:
+  RDSStackOwner:
+    Description: Enter the Name of the RDSStackOwner for this Stack.
+    Type: String
+    Default: POCDBRDSStackOwner
+  MasterUsername:
+    Description: Database administration name.
+    Type: String
+    Default: rdsroot
+  MasterUserPassword:
+    NoEcho: 'true'
+    Description: Database administration password.
+    Type: String
+    MinLength: '8'
+    AllowedPattern: "[a-zA-Z0-9!?]*"
+    ConstraintDescription: Must only contain upper and lowercase letters and numbers
+  BackupRetentionPeriod:
+    Description: Backup Retention in Days- For testing purpose it is better to give 0 to avoid service usage/billing
+    Type: Number
+    Default: '7'
+  MultiAvailabilityZone:
+    Description: Enable Multiple Availability Zone !!
+    Type: String
+    Default: 'false'
+    AllowedValues:
+    - 'true'
+    - 'false'
+  DBTcpPort:
+    Description: Enter RDS Listening TCP Port number.
+    Type: Number
+    Default: '3306'
+  PreferredBackupWindow:
+    Description: Enter Preferred Backup Window Time.
+    Type: String
+    Default: 20:00-22:00
+  PreferredMaintenanceWindow:
+    Description: Enter Preferred Maintenance Window Time.
+    Type: String
+    Default: Sun:06:00-Sun:10:00
+  AllocatedStorage:
+    Default: '15'
+    Description: Enter the size of the database (Gb)
+    Type: Number
+    MinValue: '5'
+    MaxValue: '6144'
+    ConstraintDescription: Must be between 5-6144
+  SnapshotOnDelete:
+    Description: Should a Snapshot be created on instance delete !!
+    Type: String
+    Default: 'false'
+    AllowedValues:
+    - 'true'
+    - 'false'
+  AutoMinorVersionUpgrade:
+    Description: Allow automatic minor version upgrade on the instance !
+    Type: String
+    Default: 'false'
+    AllowedValues:
+    - 'true'
+    - 'false'
+  InstanceType:
+    Description: Select Instance Type.
+    Type: String
+    Default: db.t2.micro
+    ConstraintDescription: Must be a valid EC2 instance type.
+Mappings:
+  Settings:
+    MySQL:
+      Engine: MySQL
+      Version: '8.0'
+Conditions:
+  ConfigureSnapshotOnDelete:
+    Fn::Equals:
+    - Ref: SnapshotOnDelete
+    - 'true'
+
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+    - Label:
+        default: RDSStackOwnership
+      Parameters:
+      - RDSStackOwner
+    - Label:
+        default: Network Configuration
+      Parameters:
+      - DBVPC
+      - DBPvtSubnetOne
+      - DBPvtSubnetTwo
+      - DBPvtSubnetThree
+    - Label:
+        default: RDS Database Configuration
+      Parameters:
+      - InstanceType
+      - BackupRetentionPeriod
+      - SnapshotOnDelete
+      - AllocatedStorage
+      - PreferredBackupWindow
+      - PreferredMaintenanceWindow
+      - MasterUsername
+      - MasterUserPassword
+      - AutoMinorVersionUpgrade
+      - TcpPort
+      - MultiAvailabilityZone
+    ParameterLabels:
+      RDSStackOwner:
+        default: It could be org or actual owner name 
+      InstanceType:
+        default: Instance Type
+      DBPvtSubnetOne:
+        default: DB Private Subnet One
+      DBPvtSubnetTwo:
+        default: DB Private Subnet Two
+      DBPvtSubnetThree:
+        default: DB Private Subnet Three
+      MasterUsername:
+        default: Master Username
+      MasterUserPassword:
+        default: Master User Password
+      BackupRetentionPeriod:
+        default: Backup Retention Period
+      PreferredBackupWindow:
+        default: Preferred Backup Window
+      PreferredMaintenanceWindow:
+        default: Preferred Maintenance Window
+      AllocatedStorage:
+        default: Allocated Storage
+      AutoMinorVersionUpgrade:
+        default: Auto Minor Version Upgrade
+      TcpPort:
+        default: TCP Port
+      MultiAvailabilityZone:
+        default: Multi Availability Zone?
+      SnapshotOnDelete:
+        default: Snapshot On Delete?
+
+Resources:
+
+  DBVPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: 10.1.0.0/16
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      Tags:
+      - Key: Name
+        Value:  !Join ['', [!Ref "AWS::StackName", "-DBVPC" ]]
+        
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+    DependsOn: DBVPC
+  AttachGateway:
+    # Both the resources are created. Attach Internet GW to VPC
+    Type: AWS::EC2::VPCGatewayAttachment
+    
+    Properties:
+      VpcId: !Ref DBVPC
+      InternetGatewayId: !Ref InternetGateway
+
+  # Create 3 Private Subnets to attatch to the DB Subnet group
+  DBPvtSubnetOne:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref DBVPC
+      CidrBlock: 10.1.20.0/24
+      AvailabilityZone: !Select [ 0, !GetAZs ]    # Get the first AZ in the list  
+      Tags:
+      - Key: Name
+        Value: !Sub ${AWS::StackName}-Private-A
+  DBPvtSubnetTwo:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref DBVPC
+      CidrBlock: 10.1.30.0/24
+      AvailabilityZone: !Select [ 1, !GetAZs ]    # Get the second AZ in the list  
+      Tags:
+      - Key: Name
+        Value: !Sub ${AWS::StackName}-Private-B
+  DBPvtSubnetThree:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref DBVPC
+      CidrBlock: 10.1.40.0/24
+      AvailabilityZone: !Select [ 1, !GetAZs ]    # Get the second AZ in the list  
+      Tags:
+      - Key: Name
+        Value: !Sub ${AWS::StackName}-Private-C
+
+        # Create EC2 Security Group for adding the VPC to the properties
+  RDSAccessSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Instance to RDS Access
+      VpcId: !Ref DBVPC
+      Tags:
+      - Key: Name
+        Value:
+          Fn::Join:
+          - ''
+          - - Ref: AWS::StackName
+            - "-rds"
+      - Key: RDSStackOwner
+        Value:
+          Ref: RDSStackOwner
+          # Create Ingress Seciruty Group
+  AccessSecurityGroupIngress:
+    Type: AWS::EC2::SecurityGroupIngress
+    DependsOn: RDSAccessSecurityGroup
+    Properties:
+      GroupId:
+        Ref: RDSAccessSecurityGroup
+      IpProtocol: tcp
+      FromPort: 0
+      ToPort: 65535
+      SourceSecurityGroupId:
+        Ref: RDSAccessSecurityGroup
+  DbSubnetGroup:
+    Type: AWS::RDS::DBSubnetGroup
+    Properties:
+      DBSubnetGroupDescription:
+        Fn::Join:
+        - ''
+        - - 'RDS Subnet Group for '
+          - Ref: AWS::StackName
+      SubnetIds:
+      - Ref: DBPvtSubnetOne
+      - Ref: DBPvtSubnetTwo
+      - Ref: DBPvtSubnetThree
+      Tags:
+      - Key: Name
+        Value:
+          Ref: AWS::StackName
+      - Key: RDSStackOwner
+        Value:
+          Ref: RDSStackOwner
+  # DB Instance Creation for adding all the relevenat properties to instance. 
+  # This configuration does not create a snapshot on deletion. If needed DeletionPolicy property can be added as Snapshot
+  DbInstance:
+    Type: AWS::RDS::DBInstance
+    DependsOn:
+    - DbSubnetGroup
+    - RDSAccessSecurityGroup
+    Properties:
+      AllocatedStorage:
+        Ref: AllocatedStorage
+      AllowMajorVersionUpgrade: 'false'
+      AutoMinorVersionUpgrade:
+        Ref: AutoMinorVersionUpgrade
+      BackupRetentionPeriod:
+        Ref: BackupRetentionPeriod
+      DBInstanceClass:
+        Ref: InstanceType
+      DBInstanceIdentifier:
+        Ref: AWS::StackName
+      DBSubnetGroupName:
+        Ref: DbSubnetGroup
+      Engine:
+        Fn::FindInMap:
+        - Settings
+        - MySQL
+        - Engine
+      EngineVersion:
+        Fn::FindInMap:
+        - Settings
+        - MySQL
+        - Version
+      MasterUsername:
+        Ref: MasterUsername
+      MasterUserPassword:
+        Ref: MasterUserPassword
+      MultiAZ:
+        Ref: MultiAvailabilityZone
+      Port:
+        Ref: DBTcpPort
+      PreferredBackupWindow:
+        Ref: PreferredBackupWindow
+      PreferredMaintenanceWindow:
+        Ref: PreferredMaintenanceWindow
+      PubliclyAccessible: 'false'
+      StorageEncrypted: 'false'
+      StorageType: gp2
+      VPCSecurityGroups:
+      - Ref: RDSAccessSecurityGroup
+      Tags:
+      - Key: Name
+        Value:
+          Ref: AWS::StackName
+      - Key: RDSStackOwner
+        Value:
+          Ref: RDSStackOwner
+
+Outputs:
+  RDSStackOwner:
+    Description: Team or Individual that Owns this Formation.
+    Value:
+      Ref: RDSStackOwner
+  VPC:
+    Description: VPC Used
+    Value:
+      Ref: DBVPC
+  RDSHostname:
+    Description: RDS Hostname
+    Value:
+      Fn::GetAtt:
+      - DbInstance
+      - Endpoint.Address
+  RDSPort:
+    Description: RDS Port
+    Value:
+      Fn::GetAtt:
+      - DbInstance
+      - Endpoint.Port
+  DbSubnetGroup:
+    Description: DB Subnet Group Created.
+    Value:
+      Ref: DbSubnetGroup
+  RDSAccessSecurityGroup:
+    Description: RDS Access Security Group Created.
+    Value:
+      Ref: RDSAccessSecurityGroup
+  DBPvtSubnetOne:
+    Description: Private Subnet A Deployment
+    Value:
+      Ref: DBPvtSubnetOne
+  DBPvtSubnetTwo:
+    Description: Private Subnet B Deployment
+    Value:
+      Ref: DBPvtSubnetTwo
+  DBPvtSubnetThree:
+    Description: Private Subnet C Deployment
+    Value:
+      Ref: DBPvtSubnetThree
+  BackupRetentionPeriod:
+    Description: Backup Retention Period in Days
+    Value:
+      Ref: BackupRetentionPeriod
+  MultiAvailabilityZone:
+    Description: Enable Multi Availability Zones?
+    Value:
+      Ref: MultiAvailabilityZone
+  SnapshotOnDelete:
+    Description: Should a Snapshot be created on Delete ?
+    Value:
+      Ref: SnapshotOnDelete
+  PreferredBackupWindow:
+    Description: Preferred Backup Window
+    Value:
+      Ref: PreferredBackupWindow
+  PreferredMaintenanceWindow:
+    Description: Preferred Maintenance Window
+    Value:
+      Ref: PreferredMaintenanceWindow
+  AllocatedStorage:
+    Description: Allocated Storage in GB
+    Value:
+      Ref: AllocatedStorage
