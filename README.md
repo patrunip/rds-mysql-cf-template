@@ -18,12 +18,13 @@ If "aws cli" is already configured in your system, please use below command to t
 
 AWS CLI command to create the Database
 
-aws cloudformation create-stack --stack-name POCDBStack --template-body file://AWS_VPC_RDS_MySQL_Template.yaml --parameters ParameterKey=MasterUserPassword,ParameterValue=password
+     aws cloudformation create-stack --stack-name POCDBStack --template-body file://AWS_VPC_RDS_MySQL_Template.yaml --parameters ParameterKey=MasterUserPassword,ParameterValue=password
 
-The password has to be given as a parameter while creating the database. 
+    The password has to be given as a parameter while creating the database. 
+
 For the ParameterValue, we need to give our own password which will secured by the admin.
 
 To delete the stack
 
-aws cloudformation delete-stack --stack-name POCDBStack 
+    aws cloudformation delete-stack --stack-name POCDBStack 
 
